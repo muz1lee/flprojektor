@@ -294,7 +294,7 @@ def get_fl_model_log_error(train_loaders, test_loader,args):
     return global_test_accuracy, global_test_loss, weight_trainerr, uni_trainerr
 
 def get_ot_dist(train_loader, test_loader, n=5000):
-    
+    #Todo:change the centralized calculation to decentrlized calculation
     
     net_test = PreActResNet18()
     net_test = net_test.to(device)
