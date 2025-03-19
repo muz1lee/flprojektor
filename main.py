@@ -32,6 +32,7 @@ from otdd.pytorch.distance import  FeatureCost
 from otdd.pytorch.moments import *
 from otdd.pytorch.utils import *
 
+import ot
 
 def get_args():
     
@@ -98,46 +99,67 @@ class DatasetSplit(Dataset):
         return image, label
     
 
+
+def cal_distance(X,Y,metric):
+    
+    nx, ny  = X.shape[0], Y.shape[0]
+    p = 2 if metric=='sqeuclidean' else 1  
+    if a is None:  
+        a = np.ones((nx,),dtype=np.float64) / nx
+    if b is None:
+        b = np.ones((ny,),dtype=np.float64) / ny  
+    # loss matrix
+    M = ot.dist(X,Y,metric=metric) # squared euclidean distance 'default'
+    # compute EMD
+    norm = np.max(M) if np.max(M)>1 else 1
+    G0 = ot.emd(a, b, M/norm)
+    
+    cost = np.sum(G0*M)**(1/p)
+
+    return cost 
+    
 class InterpMeas:
     def __init__(self, metric: str = "sqeuclidean", t_val: float = 0.5):
-    self.metric = metric
-    self.t_val = t_val
+        self.metric = metric
+        self.t_val = t_val
 
-def fit(
-    self,
-    X: np.ndarray,
-    Y: np.ndarray,
-    # a: np.ndarray | None = None,
-    # b: np.ndarray | None = None,
-):
-    """
+    def fit(
+        self,
+        X: np.ndarray,
+        Y: np.ndarray,
+        # a: np.ndarray | None = None,
+        # b: np.ndarray | None = None,
+    ):
+        """
 
-    Args:
-        X `numpy.ndarray`
-        Y `numpy.ndarray`
-        a `numpy.ndarray` | `NONE` The weights of the empirical distribution X . Defaults to None with equal weights.
-        b `numpy.ndarray` | `NONE` The weights of the empirical distribution X . Defaults to None with equal weights.
+        Args:
+            X `numpy.ndarray`
+            Y `numpy.ndarray`
+            a `numpy.ndarray` | `NONE` The weights of the empirical distribution X . Defaults to None with equal weights.
+            b `numpy.ndarray` | `NONE` The weights of the empirical distribution X . Defaults to None with equal weights.
 
-    Returns:
-    """
+        Returns:
+        """
 
-    t_val = np.random.rand() if self.t_val == None else self.t_val
+        t_val = np.random.rand() if self.t_val == None else self.t_val
 
-    nx, ny = X.shape[0], Y.shape[0]
-    p = 2 if self.metric == "sqeuclidean" else 1
+        nx, ny = X.shape[0], Y.shape[0]
+        p = 2 if self.metric == "sqeuclidean" else 1
 
-    a = np.ones((nx,), dtype=np.float64) / nx
-    b = np.ones((ny,), dtype=np.float64) / ny
+        a = np.ones((nx,), dtype=np.float64) / nx
+        b = np.ones((ny,), dtype=np.float64) / ny
 
-    M = ot.dist(X, Y, metric=self.metric)
+        M = ot.dist(X, Y, metric=self.metric)
 
-    norm = np.max(M) if np.max(M) > 1 else 1
-    G0 = ot.emd(a, b, M / norm)
+        norm = np.max(M) if np.max(M) > 1 else 1
+        G0 = ot.emd(a, b, M / norm)
 
-    Z = (1 - t_val) * X + t_val * (G0 * nx) @ Y
+        Z = (1 - t_val) * X + t_val * (G0 * nx) @ Y
 
-    return Z
+        return Z
    
+
+
 class PreActBlock(nn.Module):
     '''Pre-activation version of the BasicBlock.'''
     expansion = 1
@@ -387,14 +409,14 @@ def process_data(data_loader):
     return XA
 
 
-def get_ot_dist_private(local_train_loaders,val_loader):
+def get_ot_dist_triangle(args,local_train_loaders,val_loader):
     """"
     k : supporting size of the global gamma 
     t_val : could be any value between (0,1)
     """
 
-    k = 200  
-    t_val = 0.5 
+    k = args.gamma_size
+    t_val = args.t_val 
 
     aug_train_data = []
     for local_dl in local_train_loaders:
@@ -404,17 +426,18 @@ def get_ot_dist_private(local_train_loaders,val_loader):
     
     dim = aug_train_data[0].dim[1]
     global_gamma = np.random.randn(k, dim)
-    interp_mea = InterpMeas(metric='sqeuclidean', t_val=t_val)
+    interp_mea = InterpMeas(metric= args.metric, t_val=t_val)
     
-    train_int = [] 
+    train_IntMea = [] 
     for local_data in aug_train_data:
-        train_int.append( interp_mea.fit(local_data, global_gamma) ) 
+        train_IntMea.append( interp_mea.fit(local_data, global_gamma) ) 
     
-    val_int  =  interp_mea.fit(aug_val_data, global_gamma)
+    train_IntMea  = np.vstack(train_IntMea)
+    val_IntMea  =  interp_mea.fit(aug_val_data, global_gamma)
     
-
-    dist = 0 
-    return dist 
+    cost = cal_distance(train_IntMea,val_IntMea,args.metric)
+    
+    return cost 
 
 def get_ot_dist(train_loader, test_loader, n=5000):
     #Todo:change the centralized calculation to decentrlized calculation
@@ -596,9 +619,9 @@ def main(args, data_dict):
                                                     shuffle=True))
             for rep in range(reps):
                 # get OT dist
-                ot_dist_combine = get_ot_dist(train_loader, test_loader, n=n)
-                
-
+               
+                ot_dist_combine = get_ot_dist_triangle(args,local_train_loaders,test_loader)
+                # ot_dist_combine = get_ot_dist(train_loader, test_loader, n=n)
                 test_loss, test_acc, train_loss = get_fl_model_log_error(local_train_loaders, test_loader, args)
 
                 trainerrlog.append(train_loss)
