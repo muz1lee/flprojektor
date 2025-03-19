@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # [Projektor-NeurIPS 2023] Performance Scaling via Optimal Transport: Enabling Data Selection from Partially Revealed Sources
 ![Python 3.8.10](https://img.shields.io/badge/python-3.8.10-DodgerBlue.svg?style=plastic)
 
@@ -34,3 +35,6 @@ RJ and the ReDS lab acknowledge support through grants from the Amazon-Virginia 
 for Efficient and Robust Machine Learning, the National Science Foundation under Grant No.
 IIS-2312794, NSF IIS-2313130, NSF OAC-2239622, and the Commonwealth Cyber Initiative
 
+=======
+# flprojektor
+>>>>>>> 32d1e26182d1ee2fe8022d2d24e5e6350d1fe492
