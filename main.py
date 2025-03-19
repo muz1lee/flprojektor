@@ -293,72 +293,6 @@ def get_fl_model_log_error(train_loaders, test_loader,args):
 
     return global_test_accuracy, global_test_loss, weight_trainerr, uni_trainerr
 
-def get_model_log_err(train_loader, test_loader, epochs = 110):
-    
-    net = PreActResNet18()
-    net = net.to(device)
-
-    test_criterion = nn.CrossEntropyLoss()
-
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(net.parameters(),lr=0.001, betas=(0.9, 0.999), eps=1e-08, weight_decay=0)
-    best_train_loss = 999999
-    for epoch in range(epochs):
-        # Training
-    #     print('Epoch {}/{}'.format(epoch + 1, 70))
-    #     print('-' * 10)
-        start_time = time.time()
-        net.train()
-        train_loss = 0
-        correct = 0
-        total = 0
-        for batch_idx, (inputs, targets) in enumerate(train_loader):
-            inputs, targets = inputs.to(device), targets.to(device)
-            optimizer.zero_grad()
-            outputs = net(inputs)
-            loss = criterion(outputs, targets)
-            loss.backward()
-            optimizer.step()
-
-            train_loss += loss.item()
-            _, predicted = outputs.max(1)
-            total += targets.size(0)
-            correct += predicted.eq(targets).sum().item()
-        end_time = time.time()
-        if epoch % 10 == 0:
-            print('%.1f . TrainLoss: %.3f | TrainAcc: %.3f%% (%d/%d) | Time Elapsed %.3f sec ' % (epoch, train_loss/(batch_idx+1), 100.*correct/total, correct, total, end_time-start_time))
-        best_train_loss = min(best_train_loss, train_loss/(batch_idx+1))
-        
-            
-#         net.eval()
-        test_loss = 0
-        correct = 0
-        total = 0
-#         acc = [0 for c in list_of_classes]
-
-        with torch.no_grad():
-            for batch_idx, (inputs, targets) in enumerate(test_loader):
-                inputs, targets = inputs.to(device), targets.to(device)
-                outputs = net(inputs)
-                loss = test_criterion(outputs, targets)
-
-                test_loss += loss.item()
-                _, predicted = outputs.max(1)
-                total += targets.size(0)
-                correct += predicted.eq(targets).sum().item()
-                
-                # class wise accuracy
-            
-    
-        if epoch % 10 == 0:
-            print('TestLoss: %.3f | TestAcc: %.3f%% (%d/%d)' % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
-
-        
-    test_loss /= (batch_idx+1)    
-    print(f"test loss {test_loss} train loss {best_train_loss}")
-        
-    return test_loss - best_train_loss, 100.*correct/total
-
 def get_ot_dist(train_loader, test_loader, n=5000):
     
     
@@ -541,7 +475,6 @@ def main(args, data_dict):
                 # get OT dist
                 ot_dist_combine = get_ot_dist(train_loader, test_loader, n=n)
 
-                # global_test_accuracy, global_test_loss, train_loss_collector
                 test_loss, test_acc, train_loss = get_fl_model_log_error(local_train_loaders, test_loader, args)
 
                 trainerrlog.append(train_loss)
@@ -549,17 +482,28 @@ def main(args, data_dict):
                 accs.append(test_acc)
                 otlog.append(ot_dist_combine)
                 
-                
-        print("j: ", j, " it took: ", time.time() - start_t)
         
         qstrainerrlog.append(trainerrlog)
         qstesterrlog.append(testerrlog)
         qsotlog.append(otlog)
         qsaccs.append(accs)
+
+
+    # pickle.dump([qstrainerrlog,qstesterrlog,qsotlog,qsaccs], open(f'cif10_3sources/{args.alg}_unbalanced_{n}.res', 'wb' ))
+
+
+    args_dict = vars(args)
+    
+    results = {
+        'args': args_dict,
+        'train_err_log': qstrainerrlog,
+        'test_err_log': qstesterrlog,
+        'ot_log': qsotlog,
+        'accuracies': qsaccs
+    }
+    pickle.dump(results, open(f'cif10_3sources/{args.alg}_unbalanced_{args.n}.res', 'wb'))
        
-    pickle.dump([qstrainerrlog,qstesterrlog,qsotlog,qsaccs], open(f'projektor_data/{args.alg}_cif10_3sources_unbalanced_{n}.res', 'wb' ))
-
-
+  
 
 if __name__ == "__main__":
 
