@@ -1,0 +1,8 @@
+scikit-learn
+numpy
+scipy
+torch
+torchvision
+pandas
+requests
+pot

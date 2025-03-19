@@ -1,17 +1,21 @@
 # Federated Data Selection with Wasserstein Distance
 
 
-## 1. FL training 
+## Stage 1: FL training 
 
+### Fedprox
 
 ```bash
 python main.py --cnum 0 --n 3 \
                --dataset cifar10 \
+               --model simple-cnn \
+               --alg fedprox \
+               --mu 0.1 \
                --batch_size 64 \
-               --lr 0.1 \
+               --lr 0.01 \
                --comm_round 80 \
                --epochs 10 \
-               --alg fedavg
+               
 ```
 
 Description: 
@@ -21,6 +25,7 @@ Description:
 - `--epochs`: local epochs 
 - `--comm_round`: global iterations
 - `--alg`: fedavg/fedprox
+- `--mu`: penalty term in fedprox
 
 ## 2. Projektor 
 
