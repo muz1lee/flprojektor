@@ -28,7 +28,9 @@ from torch.utils.data import random_split, Dataset, TensorDataset, DataLoader
 import argparse
 
 from flalg.experiments import *
-
+from otdd.pytorch.distance import  FeatureCost
+from otdd.pytorch.moments import *
+from otdd.pytorch.utils import *
 
 
 def get_args():
@@ -81,7 +83,61 @@ def get_args():
 
 
 
+class DatasetSplit(Dataset):
     
+    def __init__(self, dataset, idxs):
+        self.dataset = dataset
+        self.idxs = list(idxs)
+        self.targets = torch.LongTensor(self.dataset.targets)[idxs]
+
+    def __len__(self):
+        return len(self.idxs)
+
+    def __getitem__(self, item):
+        image, label = self.dataset[self.idxs[item]]
+        return image, label
+    
+
+class InterpMeas:
+    def __init__(self, metric: str = "sqeuclidean", t_val: float = 0.5):
+    self.metric = metric
+    self.t_val = t_val
+
+def fit(
+    self,
+    X: np.ndarray,
+    Y: np.ndarray,
+    # a: np.ndarray | None = None,
+    # b: np.ndarray | None = None,
+):
+    """
+
+    Args:
+        X `numpy.ndarray`
+        Y `numpy.ndarray`
+        a `numpy.ndarray` | `NONE` The weights of the empirical distribution X . Defaults to None with equal weights.
+        b `numpy.ndarray` | `NONE` The weights of the empirical distribution X . Defaults to None with equal weights.
+
+    Returns:
+    """
+
+    t_val = np.random.rand() if self.t_val == None else self.t_val
+
+    nx, ny = X.shape[0], Y.shape[0]
+    p = 2 if self.metric == "sqeuclidean" else 1
+
+    a = np.ones((nx,), dtype=np.float64) / nx
+    b = np.ones((ny,), dtype=np.float64) / ny
+
+    M = ot.dist(X, Y, metric=self.metric)
+
+    norm = np.max(M) if np.max(M) > 1 else 1
+    G0 = ot.emd(a, b, M / norm)
+
+    Z = (1 - t_val) * X + t_val * (G0 * nx) @ Y
+
+    return Z
+   
 class PreActBlock(nn.Module):
     '''Pre-activation version of the BasicBlock.'''
     expansion = 1
@@ -293,6 +349,73 @@ def get_fl_model_log_error(train_loaders, test_loader,args):
 
     return global_test_accuracy, global_test_loss, weight_trainerr, uni_trainerr
 
+
+
+def process_data(data_loader):
+    
+    net_test = PreActResNet18()
+    net_test = net_test.to(device)
+    net_test.load_state_dict(torch.load('checkpoint/preact_resnet18.pth', map_location=str('cuda:'+str(cuda_num))))
+    net_test.eval()
+
+    embedder = net_test.to(device)
+    embedder.fc = torch.nn.Identity()
+    for p in embedder.parameters():
+        p.requires_grad = False
+    
+    features = data_loader.dataset.tensors[0]  
+    labels = data_loader.dataset.tensors[1] 
+
+    with torch.no_grad(): 
+        embedded_features = embedder(features)
+
+    dim = embedded_features.size(1)
+    
+    dataset = TensorDataset(embedded_features, labels)
+    new_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
+
+    vals, cts = torch.unique(labels, return_counts=True)
+    # min_labelcount = 2
+    # classes = torch.sort(vals[cts >= min_labelcount])[0]
+    idxs = np.arange(len(labels))  
+    
+    M, C = compute_label_stats(new_loader, labels, idxs, classes, diagonal_cov=True)
+    
+    DA = (embedded_features.view(-1, dim), labels.to(device))
+    XA = augmented_dataset(DA, means=M, covs=C, maxn=10000)
+    
+    return XA
+
+
+def get_ot_dist_private(local_train_loaders,val_loader):
+    """"
+    k : supporting size of the global gamma 
+    t_val : could be any value between (0,1)
+    """
+
+    k = 200  
+    t_val = 0.5 
+
+    aug_train_data = []
+    for local_dl in local_train_loaders:
+        aug_train_data.append(process_data(local_dl))
+    
+    aug_val_data = process_data(val_loader)
+    
+    dim = aug_train_data[0].dim[1]
+    global_gamma = np.random.randn(k, dim)
+    interp_mea = InterpMeas(metric='sqeuclidean', t_val=t_val)
+    
+    train_int = [] 
+    for local_data in aug_train_data:
+        train_int.append( interp_mea.fit(local_data, global_gamma) ) 
+    
+    val_int  =  interp_mea.fit(aug_val_data, global_gamma)
+    
+
+    dist = 0 
+    return dist 
+
 def get_ot_dist(train_loader, test_loader, n=5000):
     #Todo:change the centralized calculation to decentrlized calculation
     
@@ -474,6 +597,7 @@ def main(args, data_dict):
             for rep in range(reps):
                 # get OT dist
                 ot_dist_combine = get_ot_dist(train_loader, test_loader, n=n)
+                
 
                 test_loss, test_acc, train_loss = get_fl_model_log_error(local_train_loaders, test_loader, args)
 
