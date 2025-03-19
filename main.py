@@ -38,12 +38,17 @@ def get_args():
     
     parser = argparse.ArgumentParser()
 
-    # 
+    # general 
     parser.add_argument('--cnum', type=int, required=True,
                     help='number of cuda in the server')
-    parser.add_argument('--n', type=int, required=True,
-                        help='number of data')
 
+
+    # interpolating measures 
+    parser.add_argument('--gamma_size', type=int, default=100, help='supporting size of gamma')
+    parser.add_argument('--t_val', type=float, default=0.5,help='value')
+    parser.add_argument('--metric', type=str, default='sqeuclidean', help='metric for wasserstein distance')
+    
+    
     # fl-algorithms 
     parser.add_argument('--model', type=str, default='mlp', help='neural network used in training')
     parser.add_argument('--dataset', type=str, default='mnist', help='dataset used for training')
@@ -277,7 +282,7 @@ def get_fl_model_log_error(train_loaders, test_loader,args):
         for round in range(args.comm_round):
             logger.info("in comm round:" + str(round))
 
-            selected = arr[:int(args.n)]
+            selected = arr[:int(args.n_parties)]
 
             global_para = global_model.state_dict()
             if round == 0:
@@ -294,7 +299,7 @@ def get_fl_model_log_error(train_loaders, test_loader,args):
             fed_avg_freqs = [len(dl.dataset) / total_data_points for dl in train_loaders]
 
 
-            for idx in range(args.n):
+            for idx in range(args.n_parties):
                 net_para = nets[idx].cpu().state_dict()
                 if idx == 0:
                     for key in net_para:
@@ -312,7 +317,7 @@ def get_fl_model_log_error(train_loaders, test_loader,args):
             global_test_accuracy.append(test_acc)
             global_test_loss.append(test_loss)
 
-            weight_loss = np.sum([ local_train_loss[i]*fed_avg_freqs[i] for i in range(args.n)])
+            weight_loss = np.sum([ local_train_loss[i]*fed_avg_freqs[i] for i in range(args.n_parties)])
             uni_loss =  np.sum(local_train_loss) / len(local_train_loss)
 
             weight_trainerr.append(weight_loss)
@@ -325,7 +330,7 @@ def get_fl_model_log_error(train_loaders, test_loader,args):
             logger.info("in comm round:" + str(round))
 
           
-            selected = arr[:int(args.n)]
+            selected = arr[:int(args.n_parties)]
 
             global_para = global_model.state_dict()
             if round == 0:
@@ -362,7 +367,7 @@ def get_fl_model_log_error(train_loaders, test_loader,args):
             global_test_accuracy.append(test_acc)
             global_test_loss.append(test_loss)
 
-            weight_loss = np.sum([ local_train_loss[i]*fed_avg_freqs[i] for i in range(args.n)])
+            weight_loss = np.sum([ local_train_loss[i]*fed_avg_freqs[i] for i in range(args.n_parties)])
             uni_loss =  np.sum(local_train_loss) / len(local_train_loss)
 
             weight_trainerr.append(weight_loss)
@@ -417,6 +422,7 @@ def get_ot_dist_triangle(args,local_train_loaders,val_loader):
 
     k = args.gamma_size
     t_val = args.t_val 
+    metric = args.metric
 
     aug_train_data = []
     for local_dl in local_train_loaders:
@@ -426,7 +432,7 @@ def get_ot_dist_triangle(args,local_train_loaders,val_loader):
     
     dim = aug_train_data[0].dim[1]
     global_gamma = np.random.randn(k, dim)
-    interp_mea = InterpMeas(metric= args.metric, t_val=t_val)
+    interp_mea = InterpMeas(metric= metric, t_val=t_val)
     
     train_IntMea = [] 
     for local_data in aug_train_data:
@@ -435,7 +441,7 @@ def get_ot_dist_triangle(args,local_train_loaders,val_loader):
     train_IntMea  = np.vstack(train_IntMea)
     val_IntMea  =  interp_mea.fit(aug_val_data, global_gamma)
     
-    cost = cal_distance(train_IntMea,val_IntMea,args.metric)
+    cost = cal_distance(train_IntMea,val_IntMea,metric)
     
     return cost 
 
@@ -566,7 +572,7 @@ def main(args, data_dict):
     train_label_idx = data_dict['train_label_index']
     test_label_idx = data_dict['test_label_index']
 
-    n = args.n
+    n = args.n_parties
     batch_size = args.batch_size
 
     # make test dataloader
@@ -612,7 +618,7 @@ def main(args, data_dict):
 
             local_train_loaders = []
             # make train dataloader
-            for i in range(args.n):
+            for i in range(args.n_parties):
                 local_train_loaders.append(torch.utils.data.DataLoader(dataset=TensorDataset(torch.Tensor(train_x_ls[i]).permute(0,3,1,2), 
                                                     torch.LongTensor(train_y_ls[i])), 
                                                     batch_size=batch_size, 
@@ -635,10 +641,6 @@ def main(args, data_dict):
         qsotlog.append(otlog)
         qsaccs.append(accs)
 
-
-    # pickle.dump([qstrainerrlog,qstesterrlog,qsotlog,qsaccs], open(f'cif10_3sources/{args.alg}_unbalanced_{n}.res', 'wb' ))
-
-
     args_dict = vars(args)
     
     results = {
@@ -648,8 +650,11 @@ def main(args, data_dict):
         'ot_log': qsotlog,
         'accuracies': qsaccs
     }
-    pickle.dump(results, open(f'cif10_3sources/{args.alg}_unbalanced_{args.n}.res', 'wb'))
+    pickle.dump(results, open(f'cif10_3sources/{args.alg}_unbalanced_{args.n_parties}.res', 'wb'))
        
+    # pickle.dump([qstrainerrlog,qstesterrlog,qsotlog,qsaccs], open(f'cif10_3sources/{args.alg}_unbalanced_{n}.res', 'wb' ))
+
+
   
 
 if __name__ == "__main__":
@@ -663,12 +668,10 @@ if __name__ == "__main__":
         argument_path=args.log_file_name+'.json'
 
     
-    
-
 
     print(f"procs cnum {args.cnum}")
 
-    print(f"data cnum {args.n}")
+    print(f"data cnum {args.n_parties}")
         
     print("end")
 
