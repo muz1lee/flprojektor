@@ -27,6 +27,6 @@ Description:
 - `--alg`: fedavg/fedprox
 - `--mu`: penalty term in fedprox
 
-## 2. Projektor 
+## Stage 2: Projektor
 
 to be updated 
