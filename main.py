@@ -5,8 +5,7 @@ from otdd.pytorch.distance import DatasetDistance, FeatureCost
 import torch
 import torchvision
 
-import torch.nn as nn
-import torch.nn.functional as F
+
 import torch.optim as optim
 import torchvision.models as models
 from torch.autograd import Variable
@@ -28,11 +27,10 @@ from torch.utils.data import random_split, Dataset, TensorDataset, DataLoader
 import argparse
 
 from flalg.experiments import *
-from otdd.pytorch.distance import  FeatureCost
-from otdd.pytorch.moments import *
-from otdd.pytorch.utils import *
 
-import ot
+from wd_utils import *
+from data_generator import * 
+from encoder_model import * 
 
 def get_args():
     
@@ -89,172 +87,9 @@ def get_args():
 
 
 
-class DatasetSplit(Dataset):
-    
-    def __init__(self, dataset, idxs):
-        self.dataset = dataset
-        self.idxs = list(idxs)
-        self.targets = torch.LongTensor(self.dataset.targets)[idxs]
-
-    def __len__(self):
-        return len(self.idxs)
-
-    def __getitem__(self, item):
-        image, label = self.dataset[self.idxs[item]]
-        return image, label
     
 
 
-def cal_distance(X,Y,metric):
-    
-    nx, ny  = X.shape[0], Y.shape[0]
-    p = 2 if metric=='sqeuclidean' else 1  
-    if a is None:  
-        a = np.ones((nx,),dtype=np.float64) / nx
-    if b is None:
-        b = np.ones((ny,),dtype=np.float64) / ny  
-    # loss matrix
-    M = ot.dist(X,Y,metric=metric) # squared euclidean distance 'default'
-    # compute EMD
-    norm = np.max(M) if np.max(M)>1 else 1
-    G0 = ot.emd(a, b, M/norm)
-    
-    cost = np.sum(G0*M)**(1/p)
-
-    return cost 
-    
-class InterpMeas:
-    def __init__(self, metric: str = "sqeuclidean", t_val: float = 0.5):
-        self.metric = metric
-        self.t_val = t_val
-
-    def fit(
-        self,
-        X: np.ndarray,
-        Y: np.ndarray,
-        # a: np.ndarray | None = None,
-        # b: np.ndarray | None = None,
-    ):
-        """
-
-        Args:
-            X `numpy.ndarray`
-            Y `numpy.ndarray`
-            a `numpy.ndarray` | `NONE` The weights of the empirical distribution X . Defaults to None with equal weights.
-            b `numpy.ndarray` | `NONE` The weights of the empirical distribution X . Defaults to None with equal weights.
-
-        Returns:
-        """
-
-        t_val = np.random.rand() if self.t_val == None else self.t_val
-
-        nx, ny = X.shape[0], Y.shape[0]
-        p = 2 if self.metric == "sqeuclidean" else 1
-
-        a = np.ones((nx,), dtype=np.float64) / nx
-        b = np.ones((ny,), dtype=np.float64) / ny
-
-        M = ot.dist(X, Y, metric=self.metric)
-
-        norm = np.max(M) if np.max(M) > 1 else 1
-        G0 = ot.emd(a, b, M / norm)
-
-        Z = (1 - t_val) * X + t_val * (G0 * nx) @ Y
-
-        return Z
-   
-
-
-class PreActBlock(nn.Module):
-    '''Pre-activation version of the BasicBlock.'''
-    expansion = 1
-
-    def __init__(self, in_planes, planes, stride=1):
-        super(PreActBlock, self).__init__()
-        self.bn1 = nn.BatchNorm2d(in_planes)
-        self.conv1 = nn.Conv2d(in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
-        self.bn2 = nn.BatchNorm2d(planes)
-        self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=1, padding=1, bias=False)
-
-        if stride != 1 or in_planes != self.expansion*planes:
-            self.shortcut = nn.Sequential(
-                nn.Conv2d(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False)
-            )
-
-    def forward(self, x):
-        out = F.relu(self.bn1(x))
-        shortcut = self.shortcut(out) if hasattr(self, 'shortcut') else x
-        out = self.conv1(out)
-        out = self.conv2(F.relu(self.bn2(out)))
-        out += shortcut
-        return out
-
-
-class PreActBottleneck(nn.Module):
-    '''Pre-activation version of the original Bottleneck module.'''
-    expansion = 4
-
-    def __init__(self, in_planes, planes, stride=1):
-        super(PreActBottleneck, self).__init__()
-        self.bn1 = nn.BatchNorm2d(in_planes)
-        self.conv1 = nn.Conv2d(in_planes, planes, kernel_size=1, bias=False)
-        self.bn2 = nn.BatchNorm2d(planes)
-        self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
-        self.bn3 = nn.BatchNorm2d(planes)
-        self.conv3 = nn.Conv2d(planes, self.expansion*planes, kernel_size=1, bias=False)
-
-        if stride != 1 or in_planes != self.expansion*planes:
-            self.shortcut = nn.Sequential(
-                nn.Conv2d(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False)
-            )
-
-    def forward(self, x):
-        out = F.relu(self.bn1(x))
-        shortcut = self.shortcut(out) if hasattr(self, 'shortcut') else x
-        out = self.conv1(out)
-        out = self.conv2(F.relu(self.bn2(out)))
-        out = self.conv3(F.relu(self.bn3(out)))
-        out += shortcut
-        return out
-
-
-class PreActResNet(nn.Module):
-    def __init__(self, block, num_blocks, num_classes=10):
-        super(PreActResNet, self).__init__()
-        self.in_planes = 64
-
-        self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
-        self.layer1 = self._make_layer(block, 64, num_blocks[0], stride=1)
-        self.layer2 = self._make_layer(block, 128, num_blocks[1], stride=2)
-        self.layer3 = self._make_layer(block, 256, num_blocks[2], stride=2)
-        self.layer4 = self._make_layer(block, 512, num_blocks[3], stride=2)
-        self.linear = nn.Linear(512*block.expansion, 10)
-#         self.linear1 = nn.Linear(128, 10)
-
-    def _make_layer(self, block, planes, num_blocks, stride):
-        strides = [stride] + [1]*(num_blocks-1)
-        layers = []
-        for stride in strides:
-            layers.append(block(self.in_planes, planes, stride))
-            self.in_planes = planes * block.expansion
-        return nn.Sequential(*layers)
-
-    def forward(self, x):
-        out = self.conv1(x)
-        out = self.layer1(out)
-        out = self.layer2(out)
-        out = self.layer3(out)
-        out = self.layer4(out)
-        out = F.avg_pool2d(out, 4)
-        out = out.view(out.size(0), -1)
-        out = self.linear(out)
-#         return out # only for embedder
-#         out = self.linear1(out)
-        return out
-
-
-def PreActResNet18():
-    return PreActResNet(PreActBlock, [2,2,2,2])
 
 
 
@@ -277,17 +112,17 @@ def get_fl_model_log_error(train_loaders, test_loader,args):
 
     weight_trainerr  = []
     uni_trainerr  = [] 
-    if args.alg == 'fedavg':
+    arr = np.arange(args.n_parties)
 
+    if args.alg == 'fedavg':
+        
         for round in range(args.comm_round):
             logger.info("in comm round:" + str(round))
-
-            selected = arr[:int(args.n_parties)]
 
             global_para = global_model.state_dict()
             if round == 0:
                 if args.is_same_initial:
-                    for idx in selected:
+                    for idx in arr:
                         nets[idx].load_state_dict(global_para)
             else:
                 nets[idx].load_state_dict(global_para)
@@ -330,26 +165,27 @@ def get_fl_model_log_error(train_loaders, test_loader,args):
             logger.info("in comm round:" + str(round))
 
           
-            selected = arr[:int(args.n_parties)]
-
             global_para = global_model.state_dict()
             if round == 0:
                 if args.is_same_initial:
-                    for idx in selected:
+                    for idx in arr:
                         nets[idx].load_state_dict(global_para)
             else:
-                for idx in selected:
+                for idx in arr:
                     nets[idx].load_state_dict(global_para)
 
-            nets, local_train_loss = local_train_net_fedprox(nets, selected, global_model, args, net_dataidx_map, test_dl = test_dl_global, device=device)
+            nets, local_train_loss = local_train_net_fedprox(nets, global_model, args, device=device)
             global_model.to('cpu')
 
-            # update global model
-            total_data_points = sum([len(net_dataidx_map[r]) for r in selected])
-            fed_avg_freqs = [len(net_dataidx_map[r]) / total_data_points for r in selected]
+          
 
-            for idx in range(len(selected)):
-                net_para = nets[selected[idx]].cpu().state_dict()
+            # # update global model
+            total_data_points = sum([len(dl.dataset) for dl in train_loaders])
+            fed_avg_freqs = [len(dl.dataset) / total_data_points for dl in train_loaders]
+
+
+            for idx in range(args.n_parties):
+                net_para = nets[idx].cpu().state_dict()
                 if idx == 0:
                     for key in net_para:
                         global_para[key] = net_para[key] * fed_avg_freqs[idx]
@@ -359,9 +195,8 @@ def get_fl_model_log_error(train_loaders, test_loader,args):
             global_model.load_state_dict(global_para)
 
 
-
             global_model.to(device)
-
+         
             test_acc, test_loss = compute_test(global_model, test_loader, device=device)
 
             global_test_accuracy.append(test_acc)
@@ -372,7 +207,7 @@ def get_fl_model_log_error(train_loaders, test_loader,args):
 
             weight_trainerr.append(weight_loss)
             uni_trainerr.append(uni_loss)
-
+            
 
     return global_test_accuracy, global_test_loss, weight_trainerr, uni_trainerr
 
@@ -480,83 +315,6 @@ def get_ot_dist(train_loader, test_loader, n=5000):
 
     return k[0].item()
 
-def dataset_q(q1_amt, q2_amt, num, train_feats, train_labels,label_idx):
-    # two datasets, q=0 -> dataset2, q=1 -> dataset1
-    # validation set: unbiased sample from MNIST validation set
-    # dataset1: class 0-4: 99% (19.8% each class), class 5-9: 1% (0.2% each class)
-    # dataset2: class 0-4: 2% (0.4% each class), class 5-9: 98% (19.6% each class)
-    # near balance at q=0.5
-
-    ds1_idx = []
-    ds2_idx = []
-    ds3_idx = []
-    ds1_labels = []
-    ds2_labels = []
-    ds3_labels = []
-    # ds1_features = []
-    # ds2_features = []
-
-    d1c1 = 0.2425
-    d1c2 = 0.005
-    d1c3 = 0.005
-
-    d2c1 = 0.0057
-    d2c2 = 0.32
-    d2c3 = 0.0057
-
-    d3c1 = 0.0014
-    d3c2 = 0.0014
-    d3c3 = 0.33
-    
-    
-    
-    # sample size
-    n = num # size of dataset for training (use for construct)
-    # ratio
-    q1 = q1_amt # q * dataset 1
-    q2 = q2_amt # q * dataset 1
-    q3 = 1-q1-q2 # q * dataset 1
-
-    for i in range(4):
-        ds1_idx.append(label_idx[i][np.random.randint(len(label_idx[i]), size=int(np.rint(n*q1*d1c1)))])
-        ds2_idx.append(label_idx[i][np.random.randint(len(label_idx[i]), size=int(np.rint(n*q2*d2c1)))])
-        ds3_idx.append(label_idx[i][np.random.randint(len(label_idx[i]), size=int(np.rint(n*q3*d3c1)))])
-        ds1_labels.append(np.ones(int(np.rint(n*q1*d1c1)))*i)
-        ds2_labels.append(np.ones(int(np.rint(n*q2*d2c1)))*i)
-        ds3_labels.append(np.ones(int(np.rint(n*q3*d3c1)))*i)
-    for i in range(4, 7):
-        ds1_idx.append(label_idx[i][np.random.randint(len(label_idx[i]), size=int(np.rint(n*q1*d1c2)))])
-        ds2_idx.append(label_idx[i][np.random.randint(len(label_idx[i]), size=int(np.rint(n*q2*d2c2)))])
-        ds3_idx.append(label_idx[i][np.random.randint(len(label_idx[i]), size=int(np.rint(n*q3*d3c2)))])
-        ds1_labels.append(np.ones(int(np.rint(n*q1*d1c2)))*i)
-        ds2_labels.append(np.ones(int(np.rint(n*q2*d2c2)))*i)
-        ds3_labels.append(np.ones(int(np.rint(n*q3*d3c2)))*i)
-    for i in range(7, 10):
-        ds1_idx.append(label_idx[i][np.random.randint(len(label_idx[i]), size=int(np.rint(n*q1*d1c3)))])
-        ds2_idx.append(label_idx[i][np.random.randint(len(label_idx[i]), size=int(np.rint(n*q2*d2c3)))])
-        ds3_idx.append(label_idx[i][np.random.randint(len(label_idx[i]), size=int(np.rint(n*q3*d3c3)))])
-        ds1_labels.append(np.ones(int(np.rint(n*q1*d1c3)))*i)
-        ds2_labels.append(np.ones(int(np.rint(n*q2*d2c3)))*i)
-        ds3_labels.append(np.ones(int(np.rint(n*q3*d3c3)))*i)
-
-    ds1_features_fl = train_feats[np.concatenate(ds1_idx)]
-    ds2_features_fl = train_feats[np.concatenate(ds2_idx)]
-    ds3_features_fl = train_feats[np.concatenate(ds3_idx)]
-    ds1_features = train_feats[np.concatenate(ds1_idx)]
-    ds2_features = train_feats[np.concatenate(ds2_idx)]
-    ds3_features = train_feats[np.concatenate(ds3_idx)]
-    train_x_2d = np.concatenate([ds1_features, ds2_features, ds3_features])
-
-    ds1_labels = np.concatenate(ds1_labels)
-    ds2_labels = np.concatenate(ds2_labels)
-    ds3_labels = np.concatenate(ds3_labels)
-
-    # train_x = np.concatenate([ds1_features_fl, ds2_features_fl, ds3_features_fl])
-    # train_y = np.concatenate([ds1_labels, ds2_labels, ds3_labels])
-
-    
-    
-    return ds1_features_fl, ds2_features_fl, ds3_features_fl,ds1_labels, ds2_labels, ds3_labels
 
 
 def main(args, data_dict):
