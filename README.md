@@ -27,6 +27,7 @@ Description:
 - `--alg`: fedavg/fedprox
 - `--mu`: penalty term in fedprox
 
+
 ## Stage 2: Projektor
 
-to be updated 
+You can check the output in the folder /results 

@@ -9,10 +9,10 @@ def cal_distance(X,Y,metric):
     
     nx, ny  = X.shape[0], Y.shape[0]
     p = 2 if metric=='sqeuclidean' else 1  
-    if a is None:  
-        a = np.ones((nx,),dtype=np.float64) / nx
-    if b is None:
-        b = np.ones((ny,),dtype=np.float64) / ny  
+
+    a = np.ones((nx,),dtype=np.float64) / nx
+
+    b = np.ones((ny,),dtype=np.float64) / ny  
     # loss matrix
     M = ot.dist(X,Y,metric=metric) # squared euclidean distance 'default'
     # compute EMD
