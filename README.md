@@ -30,4 +30,4 @@ Description:
 
 ## Stage 2: Projektor
 
-You can check the output in the folder /results 
+You can check the output in the folder /results and process_result.ipynb
